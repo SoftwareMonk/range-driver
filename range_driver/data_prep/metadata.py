@@ -18,7 +18,6 @@ def read_otn_metadata(metadata_file, sheet_skips=sheet_skips):
     dfmeta_data = dict((sname,
                         pd.read_excel(metadata_file, sheet_name=sname, skiprows=skipr))
                        for sname, skipr in sheet_skips.items())
-
     dfmeta_datadict = dfmeta_data['Data Dictionary'].set_index('Field Name')
     dfmeta_deploy = dfmeta_data['Deployment']
 
@@ -29,13 +28,16 @@ def read_otn_metadata(metadata_file, sheet_skips=sheet_skips):
 
     # remove (format) part from column names in deployment table
     col_names_split = dfmeta_deploy.columns.str.split(n=1)
-    dfmeta_deploy.columns = col_names_split.str[0]
+
+    # Convert to upper as some of the otn sheets are in lower case
+    dfmeta_deploy.columns = col_names_split.str[0].str.upper() 
     col_formats = col_names_split.str[1]
 
     # add Format column to data dictionary
     ps_formats = pd.Series(col_formats, index=col_names_split.str[0])
+    print('ps formats: ', ps_formats)
     paren_regex = r'\((.*)\)'
-    dfmeta_datadict['Format'] = ps_formats.str.extract(paren_regex)
+    dfmeta_datadict['Format'] = ps_formats.astype(str).str.extract(paren_regex)
 
     # remove NaN rows that do not have OTN_ARRAY specified
     dfmeta_deploy.dropna(subset=['OTN_ARRAY'], inplace=True)
@@ -43,6 +45,9 @@ def read_otn_metadata(metadata_file, sheet_skips=sheet_skips):
     # determine columns that have format: integer ... in data dictionary
     integer_cols = (dfmeta_datadict.index[dfmeta_datadict[units_col].str.match(r".*format: (integer.*)")].tolist()
                     + ['INS_SERIAL_NO', 'AR_SERIAL_NO'])
+    if 'STATION_NO' in integer_cols: # We don't wanna convert this because stations don't have to be numbers
+        integer_cols.remove('STATION_NO')
+    print('integer cols: ', integer_cols)
     dfmeta_datadict.loc[integer_cols,'Format'] = 'integer'
 
     # perform type conversion of integer columns, use special int to fill NaNs
@@ -84,10 +89,15 @@ def clean_vendor_tag_specs(tag_specs_df):
 
 def get_device_id(device_str):
     "Return last part of '-'-separated string as int. Works on str and DataFrames of strings."
+    if device_str.dtype == np.int64:
+        return device_str
     try:
         return device_str.str.split("-").str[-1].astype(int)
+        # return device_str.astype(str).str.split("-").str[-1].astype(int)
     except:
-        return int(device_str.split("-")[-1])
+        # return int(device_str.split("-")[-1])
+        print(device_str)
+        return int(device_str.astype(str).str.split("-")[-1])
 
 
 def get_device_from_catalog(catalog_str):

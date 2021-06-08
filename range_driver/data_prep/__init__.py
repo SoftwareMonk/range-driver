@@ -145,6 +145,8 @@ def process_intervals(detection_df, metadata):
 
     df_dets = []
     df_inits = []
+    print(metadata['transmitter'])
+    
     metadata.rt_groups = (
         dataframe_schema(['Receiver', 'Transmitter', 'tstart', 'tend'],
                             ['str', 'str', 'datetime64[ns]', 'datetime64[ns]'])
@@ -152,19 +154,23 @@ def process_intervals(detection_df, metadata):
 
     for gn, tdf in detection_df.groupby(['Receiver','Transmitter']):
         #print(" / ".join(gn))
+        print("in process intervals loop")
+        
         min_delay = metadata.transmitter.loc[gn[1], 'Transmitter.Min delay'] * 0.9
         tdf['interval'] = calc_intervals(tdf.set_index("datetime")).values
+        print("min delay: " + min_delay)
         if len(tdf) <= 1:
             continue
         interval_col = tdf.columns.get_loc('interval')
         tdf.iloc[-1, interval_col] = tdf.iloc[-2, interval_col]
         # ignore time range with short signal intervals at beginning
         init_split = tdf[tdf.interval < min_delay].index.max()
+        print("init split 1:", init_split)
         if np.isnan(init_split):
             init_split = tdf.index[0]
         else:
             init_split = get_next_index(tdf, init_split)
-
+        print('init split 2:', init_split)
         cutoff_t = tdf.loc[init_split, "datetime"]
         tdf_init = tdf[tdf.datetime<cutoff_t]
         tdf = tdf[tdf.datetime>=cutoff_t]
@@ -378,7 +384,9 @@ def read_otn_data(detections_csv,
                   otn_metadata=None,
                   vendor_tag_specs=None,
                   merge=True,
-                  bunch=False):
+                  bunch=False,
+                  detection_extract=False,
+                  sheet_skips={'Data Dictionary': 4, 'Deployment': 0}):
     """ All in one function to read OTN data
 
     Args:
@@ -394,13 +402,13 @@ def read_otn_data(detections_csv,
     """
     # Read & clean raw detections
     df_detections_raw = pd.read_csv(detections_csv)
-    df_detections = clean_raw_detections(df_detections_raw)
+    df_detections = clean_raw_detections(df_detections_raw, detection_extract=detection_extract)
     metadata = Bunch()
     metadata.receiver, metadata.transmitter, metadata.datadict = (None, ) * 3
 
     if otn_metadata:
         # Read deployment information for receivers
-        metadata.datadict, metadata.deploy = read_otn_metadata(otn_metadata)
+        metadata.datadict, metadata.deploy = read_otn_metadata(otn_metadata, sheet_skips=sheet_skips)
         deploy_cols = ['DEPLOY_LAT', 'DEPLOY_LONG', 'BOTTOM_DEPTH', 'INSTRUMENT_DEPTH', 'INS_SERIAL_NO']
         metadata.receiver = metadata.deploy[deploy_cols]
         metadata.receiver.columns = ['Receiver.lat', 'Receiver.lon', 'Receiver.bottom_depth',
@@ -431,7 +439,17 @@ def read_otn_data(detections_csv,
     else:
         return df_detections, metadata.receiver, metadata.transmitter
 
-def clean_raw_detections(df_detections_raw, dates=True, rt_ids=True, select_cols=True):
+def clean_raw_detections(df_detections_raw, dates=True, rt_ids=True, select_cols=True, detection_extract=False):
+
+    #rename columns 
+    if detection_extract:
+        df_detections_raw.rename(columns={
+            'datecollected': 'Date and Time (UTC)',
+            'receiver': 'Receiver',
+            'tagname': 'Transmitter'
+            },
+            inplace=True
+        )
     # Deal with Dates
     if dates:
         detection_datetimes = pd.to_datetime(df_detections_raw['Date and Time (UTC)'])
